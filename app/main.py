@@ -1,13 +1,13 @@
 # main.py
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Form, UploadFile, File
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from models.models import movietop
+from fastapi.templating import Jinja2Templates
+from fastapi import Request
 
-
-
-
+templates=Jinja2Templates(directory="./templates")
 
 app = FastAPI()
 
@@ -56,6 +56,26 @@ async def movies():
             9: film9,
             10: film10,
             }
+
+@app.get('/form', response_class=HTMLResponse)
+async def form(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.post('/confirm')
+async def create_film(name:str = Form(...), director:str = Form(...), price:int = Form(...), check:bool=Form(None)):
+    if check is None:
+        check_val=False
+    else:
+        check_val=True
+    return {"name": name, "director":director, "price":price, "Russian":check_val}
+
+@app.get('/fileupload', response_class=HTMLResponse)
+async def form(request: Request):
+    return templates.TemplateResponse("file_input.html", {"request": request})
+
+
+
+
 
 if __name__ == '__main__':
     uvicorn.run(app,
