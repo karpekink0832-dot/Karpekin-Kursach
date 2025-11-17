@@ -2,16 +2,17 @@
 import os
 import time
 import uuid
+import jwt
 
 import uvicorn
-from fastapi import FastAPI, Form, UploadFile, File, Request, Depends, status, HTTPException, Cookie
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Form, UploadFile, File, Request, Cookie, Depends, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import RedirectResponse
+from jwt import ExpiredSignatureError, InvalidTokenError
 
 from models.models import movietop, User
 from fastapi.templating import Jinja2Templates
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.security import OAuth2PasswordBearer
 
 templates=Jinja2Templates(directory="./templates")
 
@@ -20,7 +21,6 @@ templates=Jinja2Templates(directory="./templates")
 
 
 app = FastAPI()
-security=HTTPBasic()
 
 app.mount("/app/images", StaticFiles(directory="images"), name="images")
 
@@ -168,6 +168,72 @@ async def user_profile(session_token: str=Cookie(None)):
              10: film10,
              }
     }
+
+
+#Задание Г
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="loginJWT")
+
+SECRET_KEY='mysecretkey'
+ALGORITHM = 'HS256'
+ACCESS_TOKEN_EXPIRE_MINUTES = 2
+
+def create_jwt_token(data: dict):
+    to_encode = data.copy()
+    expire = time.time() + 60*ACCESS_TOKEN_EXPIRE_MINUTES
+    to_encode.update({"exp": expire})
+
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def get_user_from_token(token: str = Depends(oauth2_scheme)):
+    print('get user')
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return username
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+def get_user(username: str):
+    for user in USER_DATA:
+        if user.username == username:
+            return user
+    return None
+
+@app.post('/loginJWT')
+async def login(user_in: User):
+    for user in USER_DATA:
+        if user.username== user_in.username and user.password == user_in.password:
+            token = create_jwt_token({"sub": user_in.username})
+            print({"access_token": token, "token_type": "bearer"})
+            return {"access_token": token, "token_type": "bearer"}
+    return {"error": "Invalid credentials"}
+
+@app.post('/add_film')
+async def add_film(current_user: str = Depends(get_user_from_token)):
+    user = get_user(current_user)
+    if user:
+        return user
+    # Если пользователь не найден, возвращаем ошибку
+    return {"error": "User not found"}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == '__main__':
