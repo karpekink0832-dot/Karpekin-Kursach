@@ -1,15 +1,26 @@
-# main.py
+
+import os
+import time
+import uuid
+
 import uvicorn
-from fastapi import FastAPI, Form, UploadFile, File
+from fastapi import FastAPI, Form, UploadFile, File, Request, Depends, status, HTTPException, Cookie
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from models.models import movietop
+from starlette.responses import RedirectResponse
+
+from models.models import movietop, User
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 templates=Jinja2Templates(directory="./templates")
 
+
+
+
+
 app = FastAPI()
+security=HTTPBasic()
 
 app.mount("/app/images", StaticFiles(directory="images"), name="images")
 
@@ -74,7 +85,89 @@ async def form(request: Request):
     return templates.TemplateResponse("file_input.html", {"request": request})
 
 
+@app.post("/files/")
+async def upload_file(file: UploadFile = File(...)):
+    file_path = os.path.join("images", file.filename)
 
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+
+    return HTMLResponse(content=f"""
+    <html>
+        <body>
+            <img src="/app/images/{file.filename}" alt="{file.filename}">
+        </body>
+    </html>
+    """)
+
+
+#Задание В
+
+USER_DATA = [
+    User(**{"username": "user1", "password": "pass1"}),
+    User(**{"username": "user2", "password": "pass2"})
+]
+
+active_tokens={}
+usernames={}
+
+def get_user_from_db(username: str):
+    for user in USER_DATA:
+        if user.username == username:
+            return user
+    return None
+
+def is_token_valid(token: str):
+    if token in active_tokens:
+        token_time=active_tokens[token]
+        if time.time()-token_time<120:
+            return True
+    return False
+
+@app.get('/login', response_class=HTMLResponse)
+async def login_form():
+    return """
+    <form action="/login" method="post">
+        <input type="text" id="name" name="name" required>
+        <input type="password" id="password" name="password" required>
+
+        <button type="submit">Войти</button>
+    </form>"""
+
+@app.post('/login')
+async def login(name: str=Form(), password:str=Form()):
+    user=get_user_from_db(name)
+    if user and user.password==password:
+        session_token=str(uuid.uuid4())
+        active_tokens[session_token]=time.time()
+
+        usernames[session_token]=name
+
+        response=RedirectResponse(url='/user', status_code=303)
+        response.set_cookie(httponly=True, secure=True, key='session_token', value=session_token)
+        return response
+
+@app.get('/user')
+async def user_profile(session_token: str=Cookie(None)):
+    if not session_token or not is_token_valid(session_token):
+        return {"message": "Unauthorized"}
+    active_tokens[session_token]=time.time()
+    return {"username": usernames[session_token],
+            "time": time.strftime("%y-%m-%d %H:%M:%S", time.localtime(active_tokens[session_token])),
+            "films": {1: film1,
+             2: film2,
+             3: film3,
+             4: film4,
+             5: film5,
+             6: film6,
+             7: film7,
+             8: film8,
+             9: film9,
+             10: film10,
+             }
+    }
 
 
 if __name__ == '__main__':

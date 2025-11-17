@@ -5,3 +5,7 @@ class movietop(BaseModel):
     id: int
     cost: int
     director: str
+
+class User(BaseModel):
+    username: str
+    password: str
