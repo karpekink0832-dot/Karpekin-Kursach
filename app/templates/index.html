@@ -9,7 +9,7 @@
 
 <h1>Отправка данных</h1>
 
-<form action="/confirm/" method="post">
+<form action="/confirm/" method="post" enctype="multipart/form-data">
     <label for="name">Название:</label>
     <input type="text" id="name" name="name" required>
 
@@ -22,6 +22,11 @@
     <label for="check">Русский язык:</label>
     <input type="checkbox" id="check" name="check" value="True">
 
+    <label for="img">Обложка:</label>
+    <input type="file" id="img" name="file" required>
+
+    <label for="description">Описание:</label>
+    <input type="file" id="description" name="description" required>
 
     <button type="submit">Отправить</button>
 </form>

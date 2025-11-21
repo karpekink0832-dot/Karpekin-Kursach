@@ -5,7 +5,7 @@ import uuid
 import jwt
 
 import uvicorn
-from fastapi import FastAPI, Form, UploadFile, File, Request, Cookie, Depends, HTTPException
+from fastapi import FastAPI, Form, UploadFile, File, Cookie, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jwt import ExpiredSignatureError, InvalidTokenError
@@ -68,25 +68,44 @@ async def movies():
             10: film10,
             }
 
+user_movies={}
+
 @app.get('/form', response_class=HTMLResponse)
-async def form(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+async def form(session_token: str=Cookie(None)):
+    if not session_token or not is_token_valid(session_token):
+        return "Unauthorized"
+    active_tokens[session_token]=time.time()
+    return HTMLResponse(content="""
+    <form action="/confirm/" method="post" enctype="multipart/form-data">
+    <label for="name">Название:</label>
+    <input type="text" id="name" name="name" required>
+
+    <label for="director">Директор:</label>
+    <input type="text" id="director" name="director" required>
+
+    <label for="price">Цена:</label>
+    <input type="number" id="price" name="price" required>
+
+    <label for="check">Русский язык:</label>
+    <input type="checkbox" id="check" name="check" value="True">
+
+    <label for="img">Обложка:</label>
+    <input type="file" id="img" name="file" required>
+
+    <label for="description">Описание:</label>
+    <input type="file" id="description" name="description" required>
+
+    <button type="submit">Отправить</button>
+</form>""")
 
 @app.post('/confirm')
-async def create_film(name:str = Form(...), director:str = Form(...), price:int = Form(...), check:bool=Form(None)):
+async def create_film(name:str = Form(...), director:str = Form(...), price:int = Form(...), check:bool=Form(None), file: UploadFile = File(...), description: UploadFile = File(), session_token: str=Cookie(None)):
+
+    print(session_token)
     if check is None:
         check_val=False
     else:
         check_val=True
-    return {"name": name, "director":director, "price":price, "Russian":check_val}
-
-@app.get('/fileupload', response_class=HTMLResponse)
-async def form(request: Request):
-    return templates.TemplateResponse("file_input.html", {"request": request})
-
-
-@app.post("/files/")
-async def upload_file(file: UploadFile = File(...)):
     file_path = os.path.join("images", file.filename)
 
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -94,14 +113,26 @@ async def upload_file(file: UploadFile = File(...)):
     with open(file_path, "wb") as f:
         f.write(await file.read())
 
-    return HTMLResponse(content=f"""
-    <html>
-        <body>
-            <img src="/app/images/{file.filename}" alt="{file.filename}">
-        </body>
-    </html>
-    """)
+    text = await description.read()
+    text = text.decode('utf-8')
 
+    if session_token not in usernames:
+        user_movies[usernames[session_token]]=[{"name": name, "director":director, "price":price, "Russian":check_val}]
+    else:
+        user_movies[usernames[session_token]].append({"name": name, "director": director, "price": price, "Russian": check_val})
+
+    return HTMLResponse(content=f"""
+        <html>
+            <body>
+                <p>Name: {name}</p>
+                <p>Director: {director}</p>
+                <p>Price: {price}</p>
+                <p>Russian: {check_val}</p>
+                <img src="/app/images/{file.filename}" alt="{file.filename}">
+                <p>{text}</p>
+            </body>
+        </html>
+        """)
 
 #Задание В
 
@@ -112,6 +143,8 @@ USER_DATA = [
 
 active_tokens={}
 usernames={}
+
+user_sessions={}
 
 def get_user_from_db(username: str):
     for user in USER_DATA:
@@ -145,6 +178,11 @@ async def login(name: str=Form(), password:str=Form()):
 
         usernames[session_token]=name
 
+        if name not in user_sessions:
+            user_sessions[name]=[{'token':session_token, 'time':time.strftime("%y-%m-%d %H:%M:%S",time.localtime(active_tokens[session_token]))}]
+        else:
+            user_sessions[name].append({'token':session_token, 'time':time.strftime("%y-%m-%d %H:%M:%S", time.localtime(active_tokens[session_token]))})
+
         response=RedirectResponse(url='/user', status_code=303)
         response.set_cookie(httponly=True, secure=True, key='session_token', value=session_token)
         return response
@@ -153,20 +191,17 @@ async def login(name: str=Form(), password:str=Form()):
 async def user_profile(session_token: str=Cookie(None)):
     if not session_token or not is_token_valid(session_token):
         return {"message": "Unauthorized"}
+
     active_tokens[session_token]=time.time()
+
+
+    if not usernames[session_token] in user_movies:
+        user_movies[usernames[session_token]]=[]
+
     return {"username": usernames[session_token],
-            "time": time.strftime("%y-%m-%d %H:%M:%S", time.localtime(active_tokens[session_token])),
-            "films": {1: film1,
-             2: film2,
-             3: film3,
-             4: film4,
-             5: film5,
-             6: film6,
-             7: film7,
-             8: film8,
-             9: film9,
-             10: film10,
-             }
+            "token_update_time": time.strftime("%y-%m-%d %H:%M:%S", time.localtime(active_tokens[session_token])),
+            "sessions": user_sessions[usernames[session_token]],
+            "movies": user_movies[usernames[session_token]]
     }
 
 
@@ -186,7 +221,6 @@ def create_jwt_token(data: dict):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_user_from_token(token: str = Depends(oauth2_scheme)):
-    print('get user')
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
@@ -213,21 +247,34 @@ async def login(user_in: User):
             return {"access_token": token, "token_type": "bearer"}
     return {"error": "Invalid credentials"}
 
-@app.post('/add_film')
+@app.get('/add_film', response_class=HTMLResponse)
 async def add_film(current_user: str = Depends(get_user_from_token)):
     user = get_user(current_user)
     if user:
-        return user
-    # Если пользователь не найден, возвращаем ошибку
+        return HTMLResponse(content="""
+    <form action="/confirm/" method="post" enctype="multipart/form-data">
+    <label for="name">Название:</label>
+    <input type="text" id="name" name="name" required>
+
+    <label for="director">Директор:</label>
+    <input type="text" id="director" name="director" required>
+
+    <label for="price">Цена:</label>
+    <input type="number" id="price" name="price" required>
+
+    <label for="check">Русский язык:</label>
+    <input type="checkbox" id="check" name="check" value="True">
+
+    <label for="img">Обложка:</label>
+    <input type="file" id="img" name="file" required>
+
+    <label for="description">Описание:</label>
+    <input type="file" id="description" name="description" required>
+
+    <button type="submit">Отправить</button>
+</form>""")
+
     return {"error": "User not found"}
-
-
-
-
-
-
-
-
 
 
 
